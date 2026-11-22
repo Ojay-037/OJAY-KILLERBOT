@@ -1,0 +1,149 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OJAY KILLER BOT - AI Trading</title>
+<style>
+body{margin:0;font-family:Arial;background:#0a0f1e;color:white;text-align:center}
+header{padding:20px;background:#111a33}
+h1{color:#00ff9d;margin:0} .sub{color:#aaa}
+.card{background:#16204a;margin:15px;padding:15px;border-radius:15px;text-align:left}
+input{width:90%;padding:10px;margin:5px 0;border-radius:8px;border:none}
+button{width:100%;padding:14px;border:none;border-radius:10px;font-weight:bold;margin-top:8px;cursor:pointer}
+.login{background:#ff444f;color:white}
+.start{background:#00ff9d;color:black}
+.stop{background:#ff444f;color:white}
+#logs{height:180px;overflow:auto;background:black;color:#00ff9d;padding:10px;font-size:13px;text-align:left;border-radius:10px}
+.balance{font-size:24px;color:#00ff9d}
+.badge{background:#00ff9d;color:black;padding:3px 8px;border-radius:20px;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+<h1>🤖 OJAY KILLER BOT</h1>
+<p class="sub">AI Over 2 / Under 8 • Volatility 100 (1s)</p>
+<span class="badge">LIVE • DERIV CONNECTED</span>
+</header>
+
+<div class="card" id="loginCard">
+<h3>Step 1: Connect Deriv</h3>
+<p>Login safely with Deriv. We never see your password.</p>
+<button class="login" onclick="loginDeriv()">CONNECT DERIV ACCOUNT</button>
+</div>
+
+<div class="card" id="dash" style="display:none">
+<h3>Balance: $<span class="balance" id="bal">0.00</span> <span id="acc"></span></h3>
+<p>Last Digits: <span id="digits">Waiting...</span></p>
+<p>Signal: <b id="signal">Analyzing...</b></p>
+<label>Initial Stake ($)</label><input id="stake" value="0.35" type="number">
+<label>Martingale</label><input id="mart" value="2.2" type="number">
+<label>Take Profit ($)</label><input id="tp" value="10" type="number">
+<label>Stop Loss ($)</label><input id="sl" value="20" type="number">
+<button class="start" id="startBtn" onclick="startBot()">▶ START OJAY</button>
+<button class="stop" onclick="stopBot()">⏹ STOP BOT</button>
+<div id="logs"></div>
+</div>
+
+<script>
+const APP_ID = "3522KvKHjTgvUgYZye5lW";
+const REDIRECT = "https://ojay-killerbot.vercel.app";
+let ws, token="", isRunning=false, currentStake=0.35, initialStake=0.35, mart=2.2, tp=10, sl=20, totalProfit=0, lastContractId=null;
+
+function log(m){ let d=document.getElementById('logs'); d.innerHTML += "<br>> "+m; d.scrollTop=d.scrollHeight; }
+function loginDeriv(){ window.location.href=`https://oauth.deriv.com/oauth2/authorize?app_id=${APP_ID}&l=en&brand=deriv`; }
+
+function connect(){
+  ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`);
+  ws.onopen=()=>{ if(token) ws.send(JSON.stringify({authorize:token})); };
+  ws.onmessage=(e)=>{
+    let data=JSON.parse(e.data);
+    if(data.error){ log("ERROR: "+data.error.message); return; }
+    if(data.authorize){
+      document.getElementById('loginCard').style.display='none';
+      document.getElementById('dash').style.display='block';
+      document.getElementById('acc').innerText = "• "+data.authorize.loginid;
+      document.getElementById('bal').innerText = data.authorize.balance;
+      ws.send(JSON.stringify({balance:1, subscribe:1}));
+      ws.send(JSON.stringify({ticks:"R_100", subscribe:1}));
+      log("Connected! Welcome "+data.authorize.loginid);
+    }
+    if(data.balance){ document.getElementById('bal').innerText = data.balance.balance; }
+    if(data.tick){
+      // store last 100 digits
+      window.digits = window.digits || [];
+      window.digits.push(String(data.tick.quote).slice(-1));
+      if(window.digits.length>100) window.digits.shift();
+      document.getElementById('digits').innerText = window.digits.slice(-20).join(" ");
+      analyze();
+    }
+    if(data.buy){
+      lastContractId = data.buy.contract_id;
+      log(`Trade BOUGHT: ${data.buy.longcode} | Stake $${data.buy.buy_price}`);
+      ws.send(JSON.stringify({proposal_open_contract:1, contract_id:lastContractId, subscribe:1}));
+    }
+    if(data.proposal_open_contract){
+      let c=data.proposal_open_contract;
+      if(c.is_sold){
+        let profit = parseFloat(c.profit);
+        totalProfit += profit;
+        if(profit>0){ log(`✅ WIN +$${profit.toFixed(2)} | Total: $${totalProfit.toFixed(2)}`); currentStake=initialStake; }
+        else{ log(`❌ LOSS $${profit.toFixed(2)} | Total: $${totalProfit.toFixed(2)}`); currentStake = parseFloat((currentStake*mart).toFixed(2)); }
+        if(totalProfit>=tp){ log("🎯 TAKE PROFIT HIT - STOPPING"); stopBot(); return; }
+        if(totalProfit<=-sl){ log("🛑 STOP LOSS HIT - STOPPING"); stopBot(); return; }
+        setTimeout(()=>{ if(isRunning) tradeOnce(); }, 1000);
+      }
+    }
+  };
+}
+
+let lastSignal="NONE";
+function analyze(){
+  if(!window.digits || window.digits.length<50) return;
+  let over2=0, under8=0;
+  window.digits.forEach(d=>{ let n=parseInt(d); if(n>2) over2++; if(n<8) under8++; });
+  let overPct = Math.round(over2/window.digits.length*100);
+  let underPct = Math.round(under8/window.digits.length*100);
+  if(overPct>=62 && overPct>underPct) lastSignal="OVER 2";
+  else if(underPct>=62 && underPct>overPct) lastSignal="UNDER 8";
+  else lastSignal="WAIT";
+  document.getElementById('signal').innerText = `${lastSignal} | Over2: ${overPct}% Under8: ${underPct}%`;
+}
+
+function tradeOnce(){
+  if(!isRunning) return;
+  if(lastSignal=="OVER 2"){
+    buy("DIGITOVER","2");
+  } else if(lastSignal=="UNDER 8"){
+    buy("DIGITUNDER","8");
+  } else {
+    log("Waiting for strong signal...");
+    setTimeout(()=>{ if(isRunning) tradeOnce(); }, 3000);
+  }
+}
+
+function buy(type, barrier){
+  log(`Buying ${type} ${barrier} with $${currentStake}`);
+  ws.send(JSON.stringify({buy:1, price:currentStake, parameters:{amount:currentStake, basis:"stake", contract_type:type, barrier:barrier, currency:"USD", duration:5, duration_unit:"t", symbol:"R_100"}}));
+}
+
+function startBot(){
+  initialStake=parseFloat(document.getElementById('stake').value);
+  currentStake=initialStake;
+  mart=parseFloat(document.getElementById('mart').value);
+  tp=parseFloat(document.getElementById('tp').value);
+  sl=parseFloat(document.getElementById('sl').value);
+  totalProfit=0; isRunning=true;
+  log(`OJAY STARTED | Stake $${initialStake} Mart ${mart} TP $${tp} SL $${sl}`);
+  tradeOnce();
+}
+function stopBot(){ isRunning=false; log("BOT STOPPED"); }
+
+// Get token from URL after Deriv login
+let p=new URLSearchParams(window.location.search);
+if(p.get('token1')){ token=p.get('token1'); }
+connect();
+</script>
+</body>
+</html>
