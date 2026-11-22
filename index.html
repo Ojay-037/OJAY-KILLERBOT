@@ -52,7 +52,7 @@ const REDIRECT = "https://ojay-killerbot.vercel.app";
 let ws, token="", isRunning=false, currentStake=0.35, initialStake=0.35, mart=2.2, tp=10, sl=20, totalProfit=0, lastContractId=null;
 
 function log(m){ let d=document.getElementById('logs'); d.innerHTML += "<br>> "+m; d.scrollTop=d.scrollHeight; }
-function loginDeriv(){ window.location.href=`https://oauth.deriv.com/oauth2/authorize?app_id=${APP_ID}&l=en&brand=deriv`; }
+function loginDeriv(){ window.location.href=`https://oauth.deriv.com/oauth2/authorize?app_id=${APP_ID}&l=en&brand=deriv&redirect_uri=https://ojay-killerbot.vercel.app/`; }
 
 function connect(){
   ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`);
